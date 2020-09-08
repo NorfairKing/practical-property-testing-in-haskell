@@ -1,0 +1,5 @@
+resolver: lts-15.15
+packages: []
+nix:
+  packages:
+    - zlib
