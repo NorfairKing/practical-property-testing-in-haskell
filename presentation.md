@@ -569,7 +569,7 @@ spec = withMyServer $
   describe "calling the api"
     it "gets the same result twice for any argument" $
       \clientEnv ->
-        forAll arbitrary $ \arg -> do
+        property $ \arg -> do
           (r1, r2) <- runClient clientEnv $ do
               r1 <- callMyAPI arg
               r2 <- callMyAPI arg
@@ -612,7 +612,7 @@ runClient :: ClientEnv -> ClientM a -> IO a
                             
                                                       
                    
-        forAll arbitrary $ \arg -> do
+        property $ \arg -> do
           (r1, r2) <- runClient clientEnv $ do
               r1 <- callMyAPI arg
               r2 <- callMyAPI arg
@@ -631,7 +631,7 @@ runClient :: ClientEnv -> ClientM a -> IO a
   describe "calling the api"
     it "gets the same result twice for any argument" $
       \clientEnv ->
-        forAll arbitrary $ \arg -> do
+        property $ \arg -> do
           (r1, r2) <- runClient clientEnv $ do
               r1 <- callMyAPI arg
               r2 <- callMyAPI arg
@@ -646,11 +646,11 @@ runClient :: ClientEnv -> ClientM a -> IO a
 
 ``` haskell
 spec :: Spec
-spec = withMyServer $ 
+spec = withMyApp $ 
   describe "calling the api"
     it "gets the same result twice for any argument" $
       \clientEnv ->
-        forAll arbitrary $ \arg -> do
+        property $ \arg -> do
           (r1, r2) <- runClient clientEnv $ do
               r1 <- callMyAPI arg
               r2 <- callMyAPI arg
