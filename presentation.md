@@ -1,33 +1,19 @@
 ---
 author: Tom Sydney Kerckhove
 title: Practical Property Testing
-date: 2020-09-10
+date: 2020-11-05
 ---
 
 # Outline
 
 - What
 - Why
-- Internal workings
+- Relevant internal workings
+- Getting started!
 - Combinators
 - Property testing of a web service with DB
-- Links to relevant project
-
-<!--
-
-- This talk is about the reality of property testing.
-  The research is cool, and the examples in the papers and the tutorials are cute,
-  but they fail to capture what it's really like to work with property test.
-  
-- First: summarise what property testing is and why we do it.
-- Then I'll go over the internal workings of running property tests
-  and what you need to look out for there.
-- We will look at combinators, both for properties and for entire test suites
-  These allow for re-use of tests.
-- At the end I'll give some pointers to relevant projects that you probably want to look
-  at afterward.
--->
-
+- Writing your own generators
+- Links to relevant projects
 
 
 # What is property testing?
@@ -157,13 +143,333 @@ quickCheck $ \s -> all isUpper $ map toUpper s
 "1"
 ```
 
+# Getting started
+
+
+``` haskell
+spec :: Spec
+spec =
+  describe "reverse" $
+    specify "reversing twice is the same as not reversing at all" $
+      forAllValid $ \ls -> reverse (reverse ls) `shouldBe` ls
+```
+
+# Default Generators
+
+``` haskell
+forAllValid :: (GenValid a, Testable prop) => (a -> prop) -> Property
+genValid :: GenValid a => Gen a
+```
+
+# Free Generators
+
+``` haskell
+instance Validity FooBar
+instance GenUnchecked FooBar
+instance GenValid FooBar
+```
+
+. . .
+
+``` haskell
+instance GenValid FooBar where
+  genValid = genValidStructurally
+  shrinkValid = shrinkValidStructurally
+```
+
+# Getting started: Integration tests
+
+
+``` haskell
+spec :: Spec
+spec = 
+  describe "main"
+    specify "does not crash"
+      forAllValid $ \args ->
+        withArgs main args :: IO ()
+```
+
+# Getting started: What to test?
+
+``` haskell
+shouldBeValid :: (Show a, Validity a) => a -> IO ()
+```
+
+. . .
+
+``` haskell
+spec :: Spec
+spec = 
+  describe "returnAThing"
+    specify "returns a thing"
+      forAllValid $ \input -> do
+        thing <- returnAThing input
+        shouldBeValid thing
+```
+
+<!--
+
+  PAUSE FOR QUESTIONS
+
+-->
+
+# Property combinators
+
+``` haskell
+spec :: Spec
+spec = do
+  describe ">=" $
+    it "is reflexive" $
+      forAllValid $ \a ->
+        (a >= a) `shouldBe` True
+  describe "<=" $
+    it "is reflexive" $
+      forAllValid $ \a ->
+        (a <= a) `shouldBe` True
+```
+
+. . .
+ 
+``` haskell
+reflexivity :: GenValid a => (a -> a -> Bool) -> Property 
+reflexivity op = forAllValid $ \a -> (a `op` a) `shouldBe` True
+```
+
+# Property combinators
+ 
+
+Usage:
+
+``` haskell
+spec :: Spec
+spec = do
+  describe ">=" $
+    it "is reflexive" $ 
+      reflexivity (>=)
+  describe "<=" $
+    it "is reflexive" $ 
+      reflexivity (<=)
+```
+
+# Property combinators
+
+``` haskell
+producesValidsOnValids
+  :: (GenValid a, Valid b)
+  => (a -> b) -> Property
+```
+
+. . .
+
+
+``` haskell
+computeAThing :: Input -> Thing
+
+spec :: Spec
+spec = do
+  describe "computeAThing" $
+    it "computes a thing" $ 
+      producesValidsAnValids computeAThing
+```
+
+
+# Test suite combinators
+
+Definition:
+
+``` haskell
+lensSpec :: (GenValid a, GenValid b) => Lens' a b -> Spec
+```
+
+. . .
+
+Usage:
+
+``` haskell
+{-# LANGUAGE TypeApplications #-}
+
+spec :: Spec
+spec = 
+  describe "myLens" $ 
+    lensSpec myLens
+```
+
+# Test suite combinators
+
+Output:
+
+```
+  myLens
+    satisfies the first lens law
+      +++ OK, passed 100 tests.
+    satisfies the second lens law
+      +++ OK, passed 100 tests.
+    satisfies the third lens law
+      +++ OK, passed 100 tests.
+```
+
+
+<!--
+
+  PAUSE FOR QUESTIONS
+
+-->
+
+<!--
+
+  Now let's have a look at testing a real-world application
+
+-->
+
+# Property testing with a web service and/or database
+
+```
++------+    +-------------+    +----------+
+| Test | -> | Web Service | -> | Database |
++------+    +-------------+    +----------+
+```
+
+. . .
+
+Plan:
+
+- Set up everything that's necessary for tests
+  Do this once, beforehand, or around every test.
+
+- Run the tests
+
+- Tear everything down, afterward, or around every test.
+
+# Property testing with a web service and/or database
+
+``` haskell
+withMyServer :: SpecWith ClientEnv -> Spec
+withMyServer = 
+    aroundWith withMyApp 
+  . beforeAll (HTTP.newManager defaultManagerSettings)
+```
+
+. . .
+
+``` haskell
+withMyApp :: (ClientEnv -> IO a) -> HTTP.Manager -> IO a
+withMyApp func man = do
+    Warp.testWithApplication setupMyApp $ \port ->
+        func $ ClientEnv man (BaseUrl Http "127.0.0.1" port "")
+```
+
+# Property testing with a web service and/or database
+
+. . .
+
+<!--
+  Let's assume your webservice has an api with a single
+  api endpoint. We can now write a test that checks that
+  you get the same result every time, for any argument 
+  that you can pass to the API call.
+-->
+
+``` haskell
+callMyAPI :: MyArg -> ClientM MyResult
+runClient :: ClientEnv -> ClientM a -> IO a
+```
+. . .
+``` haskell
+spec :: Spec
+spec = withMyServer $ 
+  describe "calling the api"
+    it "gets the same result twice for any argument" $
+      \clientEnv ->
+        forAllValid $ \arg -> do
+          (r1, r2) <- runClient clientEnv $ do
+              r1 <- callMyAPI arg
+              r2 <- callMyAPI arg
+              pure (r1, r2)
+          r1 `shouldBe` r2
+```
+
+<!--
+  Here is the code that's necessary.
+  Let's break it down a bit so that you know how to read this.
+-->
+
+# Property testing with a web service and/or database
+
+``` haskell
+            
+                      
+                            
+                                                      
+                   
+                                     
+          (r1, r2) <- runClient clientEnv $ do
+              r1 <- callMyAPI arg
+              r2 <- callMyAPI arg
+              pure (r1, r2)
+          r1 `shouldBe` r2
+```
+
+# Property testing with a web service and/or database
+
+``` haskell
+            
+                      
+                            
+                                                      
+                   
+        forAllValid $ \arg -> do
+          (r1, r2) <- runClient clientEnv $ do
+              r1 <- callMyAPI arg
+              r2 <- callMyAPI arg
+              pure (r1, r2)
+          r1 `shouldBe` r2
+```
+
+# Property testing with a web service and/or database
+
+``` haskell
+            
+                      
+  describe "calling the api"
+    it "gets the same result twice for any argument" $
+      \clientEnv ->
+        forAllValid $ \arg -> do
+          (r1, r2) <- runClient clientEnv $ do
+              r1 <- callMyAPI arg
+              r2 <- callMyAPI arg
+              pure (r1, r2)
+          r1 `shouldBe` r2
+```
+
+# Property testing with a web service and/or database
+
+``` haskell
+spec :: Spec
+spec = withMyServer $ 
+  describe "calling the api"
+    it "gets the same result twice for any argument" $
+      \clientEnv ->
+        forAllValid $ \arg -> do
+          (r1, r2) <- runClient clientEnv $ do
+              r1 <- callMyAPI arg
+              r2 <- callMyAPI arg
+              pure (r1, r2)
+          r1 `shouldBe` r2
+```
+
+
+<!--
+
+  PAUSE FOR QUESTIONS
+
+-->
+
 
 # Custom Generators
 
 Building blocks:
 
 ``` haskell
-arbitrary :: Arbitrary a => Gen a
 suchThat :: Gen a -> (a -> Bool) -> Gen a
 elements :: [a] -> Gen a
 ```
@@ -193,7 +499,7 @@ Monad:
 ``` haskell
 genCards :: Gen [(Char, Char)]
 genCards = do
-  l <- arbitrary
+  l <- choose (1, 10)
   replicateM l genCard
 ```
 
@@ -213,7 +519,7 @@ Example:
 ``` haskell
 genListOf15Ints :: Gen [Int]
 genListOf15Ints = resize 15 $ sized $ \n ->
-  replicateM n arbitrary
+  replicateM n genValid
 ```
 
 
@@ -254,7 +560,7 @@ forAllShrink myCustomGenerator
 
 ``` haskell
 forAllShrink
-  (arbitrary `suchThat` (> 5))
+  (genValid `suchThat` (> 5))
   shrink $ \i ->
     i > 5 && even i
 ```
@@ -367,10 +673,10 @@ data Tree = Leaf | Branch Tree Tree
 ```
 
 ``` haskell
-instance Arbitrary Tree where
-    arbitrary = oneof
+instance GenValid Tree where
+    genValid = oneof
       [ pure Leaf
-      , Branch <$> arbitrary <*> arbitrary]
+      , Branch <$> genValid <*> genValid]
 ```
 
 ``` haskell
@@ -401,264 +707,7 @@ instance Arbitrary Tree where
       1 -> pure Leaf
       _ -> do
         (a, b) <- genSplit n
-        Branch <$> resize a arbitrary <*> resize b arbitrary
-```
-
-
-<!--
-
-  PAUSE FOR QUESTIONS
-
--->
-
-# Property combinators
-
-``` haskell
-spec :: Spec
-spec = do
-  describe ">=" $
-    it "is reflexive" $
-      forAll $ \a ->
-        (a >= a) `shouldBe` True
-  describe "<=" $
-    it "is reflexive" $
-      forAll $ \a ->
-        (a <= a) `shouldBe` True
-```
-
-. . .
- 
-``` haskell
-reflexivity :: Arbitrary a => (a -> a -> Bool) -> Property 
-reflexivity op = forAll $ \a -> (a `op` a) `shouldBe` True
-```
-
-# Property combinators
- 
-
-Usage:
-
-``` haskell
-spec :: Spec
-spec = do
-  describe ">=" $
-    it "is reflexive" $ 
-      reflexivity (>=)
-  describe "<=" $
-    it "is reflexive" $ 
-      reflexivity (<=)
-```
-
-# Property combinators
-
-``` haskell
-commutativity
-  :: Arbitrary a
-  => (a -> a -> a) -> Property
-
-symmetry
-  :: Aribtrary a
-  => (a -> a -> Bool) -> Property
-
-equivalence
-  :: (Arbitrary a, Eq b)
-  => (a -> b) -> (a -> b) -> Property
-
-inverses
-  :: (Arbitrary a, Eq a)
-  => (a -> b) -> (b -> a) -> Property
-```
-
-# Test suite combinators
-
-Definition:
-
-``` haskell
-{-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE AllowAmbiguousTypes #-}
-eqSpec :: forall a. Arbitrary a => Spec
-```
-
-. . .
-
-Usage:
-
-``` haskell
-{-# LANGUAGE TypeApplications #-}
-
-spec :: Spec
-spec = do
-  eqSpec @Int
-```
-
-# Test suite combinators
-
-Output:
-
-```
-Eq Int
-  (==) :: Int -> Int -> Bool
-    is reflexive
-    is symmetric
-    is transitive
-    is equivalent to (\a b -> not $ a /= b)
-  (/=) :: Int -> Int -> Bool
-    is antireflexive
-    is equivalent to (\a b -> not $ a == b)
-```
-
-
-<!--
-
-  PAUSE FOR QUESTIONS
-
--->
-
-<!--
-
-  Now let's have a look at testing a real-world application
-
--->
-
-# Property testing with a web service and/or database
-
-```
-+------+    +-------------+    +----------+
-| Test | -> | Web Service | -> | Database |
-+------+    +-------------+    +----------+
-```
-
-. . .
-
-Plan:
-
-- Set up everything that's necessary for tests
-  Do this once, beforehand, or around every test.
-
-- Run the tests
-
-- Tear everything down, afterward, or around every test.
-
-# Property testing with a web service and/or database
-
-
-``` haskell
--- Set up my service and run the given test with
--- an environment that knows how to call it.
-withMyApp :: (ClientEnv -> IO a) -> IO a
-withMyApp func = do
-    app <- setupMyApp
-    Warp.testWithApplication (pure app) $ \port ->
-        func $ ClientEnv man (BaseUrl Http "127.0.0.1" port "")
-```
-
-# Property testing with a web service and/or database
-
-. . .
-
-<!--
-  Let's assume your webservice has an api with a single
-  api endpoint. We can now write a test that checks that
-  you get the same result every time, for any argument 
-  that you can pass to the API call.
--->
-
-``` haskell
-spec :: Spec
-spec = withMyServer $ 
-  describe "calling the api"
-    it "gets the same result twice for any argument" $
-      \clientEnv ->
-        property $ \arg -> do
-          (r1, r2) <- runClient clientEnv $ do
-              r1 <- callMyAPI arg
-              r2 <- callMyAPI arg
-              pure (r1, r2)
-          r1 `shouldBe` r2
-
-callMyAPI :: MyArg -> ClientM MyResult
-runClient :: ClientEnv -> ClientM a -> IO a
-```
-
-<!--
-  Here is the code that's necessary.
-  Let's break it down a bit so that you know how to read this.
--->
-
-# Property testing with a web service and/or database
-
-``` haskell
-            
-                      
-                            
-                                                      
-                   
-                                     
-          (r1, r2) <- runClient clientEnv $ do
-              r1 <- callMyAPI arg
-              r2 <- callMyAPI arg
-              pure (r1, r2)
-          r1 `shouldBe` r2
-
-callMyAPI :: MyArg -> ClientM MyResult
-runClient :: ClientEnv -> ClientM a -> IO a
-```
-
-# Property testing with a web service and/or database
-
-``` haskell
-            
-                      
-                            
-                                                      
-                   
-        property $ \arg -> do
-          (r1, r2) <- runClient clientEnv $ do
-              r1 <- callMyAPI arg
-              r2 <- callMyAPI arg
-              pure (r1, r2)
-          r1 `shouldBe` r2
-
-callMyAPI :: MyArg -> ClientM MyResult
-runClient :: ClientEnv -> ClientM a -> IO a
-```
-
-# Property testing with a web service and/or database
-
-``` haskell
-            
-                      
-  describe "calling the api"
-    it "gets the same result twice for any argument" $
-      \clientEnv ->
-        property $ \arg -> do
-          (r1, r2) <- runClient clientEnv $ do
-              r1 <- callMyAPI arg
-              r2 <- callMyAPI arg
-              pure (r1, r2)
-          r1 `shouldBe` r2
-
-callMyAPI :: MyArg -> ClientM MyResult
-runClient :: ClientEnv -> ClientM a -> IO a
-```
-
-# Property testing with a web service and/or database
-
-``` haskell
-spec :: Spec
-spec = withMyApp $ 
-  describe "calling the api"
-    it "gets the same result twice for any argument" $
-      \clientEnv ->
-        property $ \arg -> do
-          (r1, r2) <- runClient clientEnv $ do
-              r1 <- callMyAPI arg
-              r2 <- callMyAPI arg
-              pure (r1, r2)
-          r1 `shouldBe` r2
-
-callMyAPI :: MyArg -> ClientM MyResult
-runClient :: ClientEnv -> ClientM a -> IO a
+        Branch <$> resize a genValid <*> resize b genValid
 ```
 
 # Links to relevant projects
@@ -670,5 +719,7 @@ runClient :: ClientEnv -> ClientM a -> IO a
   Testing framework
 
 - *validity*: https://github.com/NorfairKing/validity
-  Pre-prepared property combinators
-  Pre-prepared test suite combinators
+  Free Generators
+  Free Shrinking
+  Prepared property combinators
+  Prepared test suite combinators
