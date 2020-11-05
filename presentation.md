@@ -286,8 +286,6 @@ lensSpec :: (GenValid a, GenValid b) => Lens' a b -> Spec
 Usage:
 
 ``` haskell
-{-# LANGUAGE TypeApplications #-}
-
 spec :: Spec
 spec = 
   describe "myLens" $ 
